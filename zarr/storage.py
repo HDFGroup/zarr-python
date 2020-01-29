@@ -34,6 +34,7 @@ from pickle import PicklingError
 from threading import Lock, RLock
 import uuid
 import time
+from pathlib import PurePosixPath
 
 from numcodecs.compat import ensure_bytes, ensure_contiguous_ndarray
 from numcodecs.registry import codec_registry
@@ -44,7 +45,7 @@ from zarr.errors import (MetadataError, err_bad_compressor, err_contains_array,
 from zarr.meta import encode_array_metadata, encode_group_metadata
 from zarr.util import (buffer_size, json_loads, nolock, normalize_chunks,
                        normalize_dtype, normalize_fill_value, normalize_order,
-                       normalize_shape, normalize_storage_path)
+                       normalize_shape, normalize_storage_path, json_dumps)
 
 __doctest_requires__ = {
     ('RedisStore', 'RedisStore.*'): ['redis'],
@@ -57,6 +58,7 @@ __doctest_requires__ = {
 array_meta_key = '.zarray'
 group_meta_key = '.zgroup'
 attrs_key = '.zattrs'
+chunks_meta_key = '.zchunkstore'
 try:
     # noinspection PyUnresolvedReferences
     from zarr.codecs import Blosc
@@ -2532,3 +2534,124 @@ class ConsolidatedMetadataStore(MutableMapping):
 
     def listdir(self, path):
         return listdir(self.meta_store, path)
+
+
+class FileChunkStore(MutableMapping):
+    """A file as a chunk store.
+
+    Zarr array chunks are all in a single file.
+
+    Parameters
+    ----------
+    store : MutableMapping
+        Store for file chunk storage metadata.
+    chunk_source : io.IOBase
+        Source (file) containing chunk bytes. Default is ``None`` which meeans
+        that only chunk location metadata will be stored. No reading of chunk
+        data.
+    """
+
+    def __init__(self, store, chunk_source=None):
+        self._store = store
+        self._source = chunk_source
+        if self._source is not None:
+            if not (self._source.seekable and self._source.readable):
+                raise TypeError(f'{chunk_source}: chunk source is not '
+                                'seekable and readable')
+
+    @property
+    def store(self):
+        """MutableMapping store for file chunk information"""
+        return self._store
+
+    @staticmethod
+    def chunks_info(zarray, chunks_loc):
+        """Store chunks location information for a Zarr array.
+
+        Parameters
+        ----------
+        zarray : zarr.core.Array
+            Zarr array that will use the chunk data.
+        chunks_loc : dict
+            File storage information for the chunks belonging to the Zarr array.
+        """
+        if 'source' not in chunks_loc:
+            raise ValueError('Chunk source information missing')
+        if any([k not in chunks_loc['source'] for k in ('uri', 'array_name')]):
+            raise ValueError(
+                f'{chunks_loc["source"]}: Chunk source information incomplete')
+
+        key = _path_to_prefix(zarray.path) + chunks_meta_key
+        chunks_meta = dict()
+        for k, v in chunks_loc.items():
+            if k != 'source':
+                k = zarray._chunk_key(k)
+                if any([a not in v for a in ('offset', 'size')]):
+                    raise ValueError(
+                        f'{k}: Incomplete chunk location information')
+            chunks_meta[k] = v
+
+        # Store Zarr array chunk location metadata...
+        zarray.store[key] = json_dumps(chunks_meta)
+
+    def _get_chunkstore_key(self, chunk_key):
+        return str(PurePosixPath(chunk_key).parent / chunks_meta_key)
+
+    def __getitem__(self, chunk_key):
+        """Read in chunk bytes.
+
+        Parameters
+        ----------
+        chunk_key : str
+            Zarr array chunk key.
+
+        Returns
+        -------
+        bytes
+            Bytes of the requested chunk.
+        """
+        zchunk_key = self._get_chunkstore_key(chunk_key)
+        try:
+            zchunks = json_loads(self._store[zchunk_key])
+            chunk_loc = zchunks[chunk_key]
+        except KeyError:
+            raise KeyError(chunk_key)
+
+        # Read chunk's data...
+        self._source.seek(chunk_loc['offset'], os.SEEK_SET)
+        return self._source.read(chunk_loc['size'])
+
+    def __delitem__(self, chunk_key):
+        raise RuntimeError(f'{chunk_key}: Cannot delete chunk')
+
+    def keys(self):
+        try:
+            for key in self._store.keys():
+                if key.endswith(chunks_meta_key):
+                    chunks_info = json_loads(self._store[key])
+                    for k in chunks_info.keys():
+                        if k == 'source':
+                            continue
+                        yield k
+        except AttributeError:
+            raise RuntimeError(
+                f'{type(self._store)}: Cannot iterate over store keys')
+
+    def __iter__(self):
+        return self.keys()
+
+    def __len__(self):
+        """Total number of chunks in the file."""
+        total = 0
+        try:
+            for k in self._store.keys():
+                if k.endswith(chunks_meta_key):
+                    chunks_info = json_loads(self._store[k])
+                    total += (len(chunks_info) - 1)
+        except AttributeError:
+            raise RuntimeError(
+                f'{type(self._store)}: Does not support counting chunks')
+        return total
+
+    def __setitem__(self, chunk_key):
+        raise RuntimeError(f'{chunk_key}: Cannot modify chunk data')
