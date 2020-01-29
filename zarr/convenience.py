@@ -1112,7 +1112,7 @@ def consolidate_metadata(store, metadata_key='.zmetadata'):
 
     def is_zarr_key(key):
         return (key.endswith('.zarray') or key.endswith('.zgroup') or
-                key.endswith('.zattrs'))
+                key.endswith('.zattrs') or key.endswith('.zchunkstore'))
 
     out = {
         'zarr_consolidated_format': 1,
@@ -1179,4 +1179,5 @@ def open_consolidated(store, metadata_key='.zmetadata', mode='r+', **kwargs):
     meta_store = ConsolidatedMetadataStore(store, metadata_key=metadata_key)
 
     # pass through
-    return open(store=meta_store, chunk_store=store, mode=mode, **kwargs)
+    chunk_store = kwargs.pop('chunk_store', store)
+    return open(store=meta_store, chunk_store=chunk_store, mode=mode, **kwargs)
