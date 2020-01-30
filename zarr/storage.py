@@ -2544,25 +2544,32 @@ class FileChunkStore(MutableMapping):
     Parameters
     ----------
     store : MutableMapping
-        Store for file chunk storage metadata.
-    chunk_source : io.IOBase
-        Source (file) containing chunk bytes. Default is ``None`` which meeans
-        that only chunk location metadata will be stored. No reading of chunk
-        data.
+        Store for file chunk location metadata.
+    chunk_source : file-like object
+        Source (file) containing chunk bytes. Must be seekable and readable.
     """
 
-    def __init__(self, store, chunk_source=None):
+    def __init__(self, store, chunk_source):
         self._store = store
+        if not (chunk_source.seekable and chunk_source.readable):
+            raise TypeError(f'{chunk_source}: chunk source is not '
+                            'seekable and readable')
         self._source = chunk_source
-        if self._source is not None:
-            if not (self._source.seekable and self._source.readable):
-                raise TypeError(f'{chunk_source}: chunk source is not '
-                                'seekable and readable')
 
     @property
     def store(self):
         """MutableMapping store for file chunk information"""
         return self._store
+
+    @store.setter
+    def store(self, new_store):
+        """Set the new store for file chunk location metadata."""
+        self._store = new_store
+
+    @property
+    def source(self):
+        """The file object where chunks are stored."""
+        return self._source
 
     @staticmethod
     def chunks_info(zarray, chunks_loc):
@@ -2597,6 +2604,12 @@ class FileChunkStore(MutableMapping):
     def _get_chunkstore_key(self, chunk_key):
         return str(PurePosixPath(chunk_key).parent / chunks_meta_key)
 
+    def _ensure_dict(self, obj):
+        if isinstance(obj, bytes):
+            return json_loads(obj)
+        else:
+            return obj
+
     def __getitem__(self, chunk_key):
         """Read in chunk bytes.
 
@@ -2612,7 +2625,7 @@ class FileChunkStore(MutableMapping):
         """
         zchunk_key = self._get_chunkstore_key(chunk_key)
         try:
-            zchunks = json_loads(self._store[zchunk_key])
+            zchunks = self._ensure_dict(self._store[zchunk_key])
             chunk_loc = zchunks[chunk_key]
         except KeyError:
             raise KeyError(chunk_key)
@@ -2628,7 +2641,7 @@ class FileChunkStore(MutableMapping):
         try:
             for key in self._store.keys():
                 if key.endswith(chunks_meta_key):
-                    chunks_info = json_loads(self._store[key])
+                    chunks_info = self._ensure_dict(self._store[key])
                     for k in chunks_info.keys():
                         if k == 'source':
                             continue
@@ -2646,7 +2659,7 @@ class FileChunkStore(MutableMapping):
         try:
             for k in self._store.keys():
                 if k.endswith(chunks_meta_key):
-                    chunks_info = json_loads(self._store[k])
+                    chunks_info = self._ensure_dict(self._store[k])
                     total += (len(chunks_info) - 1)
         except AttributeError:
             raise RuntimeError(
