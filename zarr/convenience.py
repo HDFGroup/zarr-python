@@ -1178,7 +1178,7 @@ def open_consolidated(store, metadata_key='.zmetadata', mode='r+', **kwargs):
     # setup metadata sotre
     meta_store = ConsolidatedMetadataStore(store, metadata_key=metadata_key)
 
-    chunk_store = kwargs.pop('chunk_store')
+    chunk_store = kwargs.pop('chunk_store', None)
     if chunk_store is not None:
         # Update for the consolidated store...
         chunk_store.store = meta_store
