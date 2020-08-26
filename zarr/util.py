@@ -54,7 +54,7 @@ CHUNK_MAX = 64*1024*1024  # Hard upper limit
 
 def guess_chunks(shape, typesize):
     """
-    Guess an appropriate chunk layout for a dataset, given its shape and
+    Guess an appropriate chunk layout for an array, given its shape and
     the size of each element in bytes.  Will allocate chunks only as large
     as MAX_SIZE.  Chunks are generally close to some power-of-2 fraction of
     each axis, slightly favoring bigger values for the last index.
@@ -428,7 +428,15 @@ def tree_widget_sublist(node, root=False, expand=False):
 
 
 def tree_widget(group, expand, level):
-    import ipytree
+    try:
+        import ipytree
+    except ImportError as error:
+        raise ImportError(
+            "{}: Run `pip install zarr[jupyter]` or `conda install ipytree`"
+            "to get the required ipytree dependency for displaying the tree "
+            "widget. If using jupyterlab, you also need to run "
+            "`jupyter labextension install ipytree`".format(error)
+        )
 
     result = ipytree.Tree()
     root = TreeNode(group, level=level)
@@ -508,15 +516,6 @@ def check_array_shape(param, array, shape):
 def is_valid_python_name(name):
     from keyword import iskeyword
     return name.isidentifier() and not iskeyword(name)
-
-
-def class_dir(klass):  # pragma: py3 no cover
-    d = dict()
-    d.update(klass.__dict__)
-    bases = klass.__bases__
-    for base in bases:
-        d.update(class_dir(base))
-    return d
 
 
 class NoLock(object):
