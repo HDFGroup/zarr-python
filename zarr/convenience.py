@@ -1185,6 +1185,4 @@ def open_consolidated(store, metadata_key='.zmetadata', mode='r+', **kwargs):
     else:
         chunk_store = store
 
-    # pass through
-    chunk_store = kwargs.pop('chunk_store', None) or store
     return open(store=meta_store, chunk_store=chunk_store, mode=mode, **kwargs)
