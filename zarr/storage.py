@@ -2658,7 +2658,13 @@ class FileChunkStore(MutableMapping):
         total = 0
         try:
             for k in self._store.keys():
-                if k.endswith(chunks_meta_key):
+                if k == '.zmetadata':
+                    zmeta = self._ensure_dict(self._store[k])
+                    for zmk in zmeta['metadata'].keys():
+                        if zmk.endswith(chunks_meta_key):
+                            total += (len(zmeta['metadata'][zmk]) - 1)
+                    break
+                elif k.endswith(chunks_meta_key):
                     chunks_info = self._ensure_dict(self._store[k])
                     total += (len(chunks_info) - 1)
         except AttributeError:
